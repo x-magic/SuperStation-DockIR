@@ -1,57 +1,80 @@
-# DockIR
-Dock IR remote receiver program.
+# DockIR IR Reader
 
-## To compile pico-ir-keyboard
-1. Set up your PC to point to use the Raspberry Pi Pico SDK, follow [README](https://github.com/raspberrypi/pico-sdk/blob/master/README.md) in [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk).
-1. Clone this GitHub repo
-      ```
-      $ git clone https://github.com/gharishkumar/pico-ir-keyboard.git
-      ```
-1. Change to pico-ir-keyboard directory.
-      ```
-      $ cd pico-ir-keyboard
-      ```
-1. Setup a CMake build directory.
-      For example, if not using an IDE:
-      ```
-      $ mkdir build
-      $ cd build
-      $ cmake ..
-      ```
-1. Make your target from the build directory you created.
-      ```
-      $ make -j4
-      ```
-1. You now have `pico_ir_keyboard.elf` to load via a debugger, or `pico_ir_keyboard.uf2` that can be installed and run on your Raspberry Pi Pico via drag and drop.
- 
- **NOTE :**
-   - `IR rx pin`, `IR command` (or) `Keyboard keycode` can be customised in `pico-ir-keyboard/src/main.c`.
-   - By default `GP27` is set as `INPUT`.
-## Back story
-- It all started with adding IR remote support for [Raspberry Pi 3 Model B+](https://www.raspberrypi.org/products/raspberry-pi-3-model-b-plus/) with [custom embedded Linux](https://buildroot.org/) for Web Kiosk ( I know [Raspberry Pi GPIO](https://www.raspberrypi.org/documentation/usage/gpio/) can decode IR. I have also decoded [NEC protocol](https://www.renesas.com/us/en/document/apn/using-infrared-remote-controller-transmission-and-reception?language=en) with [Python](https://www.python.org/) in [Raspberry Pi OS](https://www.raspberrypi.org/software/operating-systems/#raspberry-pi-os-32-bit) ).
-- I have no patience in [recompiling the OS](https://buildroot.org/downloads/manual/manual.html#_cross_compilation_toolchain) with [GPIO](https://www.raspberrypi.org/documentation/usage/gpio/) and [Python](https://www.python.org/).
-- I thought it would be easy to add [Raspberry Pi Pico](https://www.raspberrypi.org/products/raspberry-pi-pico/) to emulate the keyboard (USB HID). As the [website](http://visionchart.github.io/) already has keyboard support.
-- I also found a product by [Adafruit](https://www.adafruit.com) [pIRkey](https://www.adafruit.com/product/3364) which does the same, but they discontinued it.
-## Adding HID
- &numsp;✔️ It's a relatively simple and easy process available with [TinyUSB](https://github.com/hathach/tinyusb), via [CircuitPython](https://circuitpython.org/),&nbsp;[Arduino IDE](https://www.arduino.cc/en/software) (or) [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk).
- 
- &numsp;❌ but not [MicroPython](https://micropython.org/).
-## Decoding IR with pico
-1. Try old python code.
-    - Moving on, I realised that using [Raspberry Pi Pico](https://www.raspberrypi.org/products/raspberry-pi-pico/) to decode [IR NEC protocol](https://www.renesas.com/us/en/document/apn/using-infrared-remote-controller-transmission-and-reception?language=en) and emulate a keyboard is not that easy.
-    - The previous program I used to decode [IR NEC protocol](https://www.renesas.com/us/en/document/apn/using-infrared-remote-controller-transmission-and-reception?language=en) in [Raspberry Pi 3 Model B+](https://www.raspberrypi.org/products/raspberry-pi-3-model-b-plus/) [Python](https://www.python.org/) did not work in either [MicroPython](https://micropython.org/) or [CircuitPython](https://circuitpython.org/).
-    - In both time differences between two pulses returned zero.
-2. Search for Pico specific code.
-    - I found [micropython_ir](https://github.com/peterhinch/micropython_ir) by [peterhinch](https://github.com/peterhinch) in [MicroPython](https://micropython.org/) it :tada: works great in decoding [IR NEC protocol](https://www.renesas.com/us/en/document/apn/using-infrared-remote-controller-transmission-and-reception?language=en).
-    - It uses `IRQ`, so no chance of running it in [CircuitPython](https://circuitpython.org/).
-    - By default, [MicroPython](https://micropython.org/) doesn't support HID for [Raspberry Pi Pico](https://www.raspberrypi.org/products/raspberry-pi-pico/).
-    - I tried including HID in the [MicroPython source](https://github.com/micropython/micropython) and [compile](https://github.com/micropython/micropython/tree/master/ports/rp2) it but had no luck; I should try that in the future.
-3. Changing the old code to C.
-    - As USB HID support is available in [Arduino IDE](https://www.arduino.cc/en/software), I convert that old [Python](https://www.python.org/) code to C.
-    - It didn't work either.
-4. Trying with PIO.
-    - So, I decided to convert that [Python](https://www.python.org/) code into [PIO assembly language](https://www.raspberrypi.org/blog/what-is-pio/) to include it in [CircuitPython](https://circuitpython.org/).
-    - After some searching, I found the same in a pending [pull request](https://github.com/raspberrypi/pico-examples/pull/129) by [mjcross](https://github.com/mjcross) with [PIO](https://www.raspberrypi.org/blog/what-is-pio/) in [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk) Great!
-    - Then decided to go with [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk).
-## Merging two
-- Merging is simple with the [device examples provided in TinyUSB](https://github.com/hathach/tinyusb/tree/master/examples/device) and from the [pending GitHub pull request](https://github.com/raspberrypi/pico-examples/pull/129).
+This branch turns DockIR into a Raspberry Pi Pico IR frame reader. Instead of
+emulating a USB HID keyboard, the firmware decodes NEC-timed IR frames and
+prints the received payloads to the Pico serial console.
+
+The immediate purpose is to inspect Apple Remote IR traffic before changing the
+production keyboard-emulation firmware. Captured Apple Remote findings and
+decoding notes are in [IR_READER.md](IR_READER.md).
+
+## What This Branch Does
+
+- Receives IR on `GP27` using the PIO NEC receiver.
+- Prints every decoded 32-bit NEC-shaped frame over USB CDC and UART stdio.
+- Shows payload bytes and grouped binary bits for visual comparison.
+- Identifies standard NEC frames, Apple-looking frames, repeat markers, and
+  invalid NEC-shaped payloads.
+- Normalizes Apple Remote command bytes by removing the command parity bit.
+
+This branch is for testing and protocol discovery. It intentionally does not
+send USB HID keyboard reports.
+
+## Build
+
+Set up the Raspberry Pi Pico SDK, then configure and build:
+
+```sh
+mkdir -p build
+cd build
+cmake ..
+cmake --build . -j4
+```
+
+The build produces:
+
+- `build/pico_ir_keyboard.elf` for debugger loading.
+- `build/pico_ir_keyboard.uf2` for drag-and-drop flashing to the Pico.
+
+## Serial Output
+
+Flash the UF2, open the Pico serial port, then press buttons on an IR remote.
+For Apple Remote frames, output looks like:
+
+```text
+[12345 ms] #7 raw=0xf70687ee bytes=ee 87 06 f7 bits=11101110 10000111 00000110 11110111 apple=yes custom=ok command_raw=0x06 command=0x03 (Right / Next) remote_id=0xf7 parity=ok sequence=none
+```
+
+Important fields:
+
+- `raw`: full 32-bit frame as received from the PIO FIFO.
+- `bytes`: payload bytes in transmit order.
+- `bits`: the same payload bytes in binary, grouped by byte.
+- `apple=yes`: the frame matches the Apple `ee 87` namespace.
+- `command_raw`: Apple command byte including bit-0 parity.
+- `command`: normalized Apple command, equal to `command_raw >> 1`.
+- `remote_id`: Apple remote or pair ID byte.
+- `parity`: whether the Apple command parity bit validates.
+- `sequence`: Center/Play prefix-to-tail detection for aluminum remotes.
+
+Standard NEC frames are printed as `apple=no nec=valid`. NEC-shaped payloads
+that fail both Apple and standard NEC validation are printed as
+`apple=no nec=invalid`.
+
+## Apple Remote Notes
+
+The reader confirmed that the slim aluminum Apple Remote uses Apple-specific
+NEC-like frames and can produce occasional corrupted bit patterns. Details are
+recorded in [IR_READER.md](IR_READER.md), including:
+
+- Apple payload layout and command parity.
+- Observed command table for the tested remote.
+- Center and Play/Pause two-frame behavior.
+- Remote ID locking recommendations.
+- Pairing/control frame observations.
+
+## Source Layout
+
+- `src/main.c`: serial frame reader and Apple Remote interpretation.
+- `nec_receive_library/`: PIO-based NEC frame receiver.
+- `IR_READER.md`: captured Apple Remote research and decoding notes.
