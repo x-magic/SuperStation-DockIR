@@ -1,88 +1,120 @@
-#include "bsp/board.h"
 #include "nec_receive.h"
 #include "pico/stdlib.h"
-#include "tusb.h"
+#include <stdio.h>
 
-// IR command codes for the target remote.
-#define IR_KEY_EXIT 0x16
-#define IR_KEY_OK 0x12
-#define IR_KEY_UP 0x0f
-#define IR_KEY_DOWN 0x15
-#define IR_KEY_LEFT 0x11
-#define IR_KEY_RIGHT 0x13
-#define IR_KEY_CANCEL 0x14
-#define IR_KEY_F2 0x1e
-#define IR_KEY_F9 0x1f
-#define IR_KEY_F11 0x20
-#define IR_KEY_F12 0x0e
-
-// Release after this much time without an IR frame. NEC repeat frames arrive
-// about every 110 ms, so 200 ms tolerates one missed repeat frame.
-#define RELEASE_TIMEOUT_MS 200
-
-// Marker pushed by the PIO program when it detects an NEC repeat code.
+// Marker pushed by the PIO program when it detects an NEC repeat code. NEC
+// repeat frames do not carry a payload, so the logger reports them separately.
 #define NEC_REPEAT_MARKER 0xffffffffu
 
-#define HID_REPORT_TIMEOUT_MS 50
-#define HID_TAP_MS 80
+#define APPLE_CUSTOM0 0xeeu
+#define APPLE_CUSTOM1 0x87u
+#define APPLE_CENTER_PREFIX 0x2eu
+#define APPLE_PLAY_PREFIX 0x2fu
+#define APPLE_SELECT_TAIL 0x02u
+#define APPLE_SEQUENCE_TIMEOUT_MS 250u
 #define IR_RX_GPIO 27
 
-static uint8_t ir_to_hid(uint8_t rx_data) {
-  switch (rx_data) {
-  case IR_KEY_EXIT:
-    return HID_KEY_ESCAPE;
-  case IR_KEY_OK:
-    return HID_KEY_ENTER;
-  case IR_KEY_UP:
-    return HID_KEY_ARROW_UP;
-  case IR_KEY_DOWN:
-    return HID_KEY_ARROW_DOWN;
-  case IR_KEY_LEFT:
-    return HID_KEY_ARROW_LEFT;
-  case IR_KEY_RIGHT:
-    return HID_KEY_ARROW_RIGHT;
-  case IR_KEY_CANCEL:
-    return HID_KEY_X;
-  case IR_KEY_F2:
-    return HID_KEY_F2;
-  case IR_KEY_F9:
-    return HID_KEY_F9;
-  case IR_KEY_F11:
-    return HID_KEY_F11;
-  case IR_KEY_F12:
-    return HID_KEY_F12;
+typedef struct {
+  uint8_t custom0;
+  uint8_t custom1;
+  uint8_t command;
+  uint8_t remote_id;
+} apple_ir_frame_t;
+
+static apple_ir_frame_t apple_frame_from_raw(uint32_t raw) {
+  union {
+    uint32_t raw;
+    uint8_t byte[4];
+  } frame = {.raw = raw};
+
+  return (apple_ir_frame_t){
+      .custom0 = frame.byte[0],
+      .custom1 = frame.byte[1],
+      .command = frame.byte[2],
+      .remote_id = frame.byte[3],
+  };
+}
+
+static bool apple_frame_has_custom_code(apple_ir_frame_t frame) {
+  return frame.custom0 == APPLE_CUSTOM0 && frame.custom1 == APPLE_CUSTOM1;
+}
+
+static void byte_to_bits(uint8_t value, char bits[9]) {
+  for (uint8_t i = 0; i < 8; i++) {
+    bits[i] = (value & (uint8_t)(1u << (7u - i))) ? '1' : '0';
+  }
+  bits[8] = '\0';
+}
+
+static uint8_t apple_logical_command(uint8_t raw_command) {
+  return raw_command >> 1u;
+}
+
+static uint8_t bit_count8(uint8_t value) {
+  uint8_t count = 0;
+  while (value != 0) {
+    count += value & 1u;
+    value >>= 1u;
+  }
+  return count;
+}
+
+static bool apple_command_parity_ok(apple_ir_frame_t frame) {
+  uint8_t logical_command = apple_logical_command(frame.command);
+  uint8_t expected_parity =
+      (uint8_t)((bit_count8(logical_command) + bit_count8(frame.remote_id) +
+                 1u) &
+                1u);
+  return (frame.command & 1u) == expected_parity;
+}
+
+static const char *apple_command_name(uint8_t logical_command) {
+  switch (logical_command) {
+  case 0x01:
+    return "Menu";
+  case APPLE_SELECT_TAIL:
+    return "Center/Play tail";
+  case 0x03:
+    return "Right / Next";
+  case 0x04:
+    return "Left / Previous";
+  case 0x05:
+    return "Up / Volume Up";
+  case 0x06:
+    return "Down / Volume Down";
+  case APPLE_CENTER_PREFIX:
+    return "Center prefix";
+  case APPLE_PLAY_PREFIX:
+    return "Play/Pause prefix";
   default:
-    return 0;
+    return "unknown";
   }
 }
 
-// Send one key-down/key-up tap and give the USB host time to receive both HID
-// reports.
-static void send_hid_tap(uint8_t hid_key) {
-  if (!tud_hid_n_ready(0)) {
-    return;
+static bool apple_command_is_prefix(uint8_t logical_command) {
+  return logical_command == APPLE_CENTER_PREFIX ||
+         logical_command == APPLE_PLAY_PREFIX;
+}
+
+static const char *apple_sequence_name(uint8_t logical_prefix_command) {
+  if (logical_prefix_command == APPLE_CENTER_PREFIX) {
+    return "Center";
   }
-
-  uint8_t kcode[6] = {hid_key, 0, 0, 0, 0, 0};
-  tud_hid_n_keyboard_report(0, 0, 0, kcode);
-
-  uint32_t start_ms = board_millis();
-  tud_task();
-  while (!tud_hid_n_ready(0)) {
-    tud_task();
-    if (board_millis() - start_ms > HID_REPORT_TIMEOUT_MS) {
-      break;
-    }
+  if (logical_prefix_command == APPLE_PLAY_PREFIX) {
+    return "Play/Pause";
   }
-
-  sleep_ms(HID_TAP_MS);
-  tud_hid_n_keyboard_report(0, 0, 0, NULL);
+  return "none";
 }
 
 int main(void) {
   stdio_init_all();
-  board_init();
-  tusb_init();
+
+  sleep_ms(100);
+  printf("\nDockIR IR frame reader\n");
+  printf("IR input: GP%u\n", IR_RX_GPIO);
+  printf("Apple expected bytes: %02x %02x <command> <remote_id>\n",
+         APPLE_CUSTOM0, APPLE_CUSTOM1);
+  fflush(stdout);
 
   // The LED is diagnostic: it lights on a decoded key and toggles on repeats.
   gpio_init(PICO_DEFAULT_LED_PIN);
@@ -97,72 +129,77 @@ int main(void) {
   uint rx_sm = (uint)rx_sm_result;
   uint8_t rx_address;
   uint8_t rx_data;
-
-  uint8_t last_hid_key = 0;
-  bool active = false;
-  uint32_t last_ir_time = 0;
-  bool repeat_seen = false;
+  uint32_t frame_count = 0;
+  uint32_t last_frame = 0;
+  uint8_t pending_apple_prefix = 0;
+  uint32_t pending_apple_prefix_time = 0;
 
   while (true) {
-    tud_task();
-    uint32_t now = board_millis();
-
-    // Release the active key state after the repeat timeout.
-    if (active && (now - last_ir_time >= RELEASE_TIMEOUT_MS)) {
-      active = false;
-      last_hid_key = 0;
-      repeat_seen = false;
-      gpio_put(PICO_DEFAULT_LED_PIN, 0);
-    }
+    uint32_t now = to_ms_since_boot(get_absolute_time());
 
     // Process all queued IR frames from the PIO RX FIFO.
     while (!pio_sm_is_rx_fifo_empty(pio, rx_sm)) {
       uint32_t rx_frame = pio_sm_get(pio, rx_sm);
 
       if (rx_frame == NEC_REPEAT_MARKER) {
-        if (active && last_hid_key) {
-          last_ir_time = now;
-          if (repeat_seen) {
-            gpio_xor_mask(1u << PICO_DEFAULT_LED_PIN);
-            send_hid_tap(last_hid_key);
-          }
-        }
-        repeat_seen = true;
-      } else if (nec_decode_frame(rx_frame, &rx_address, &rx_data)) {
-        uint8_t hid_key = ir_to_hid(rx_data);
-        if (hid_key) {
-          last_hid_key = hid_key;
-          last_ir_time = now;
-          repeat_seen = false;
-          active = true;
-          gpio_put(PICO_DEFAULT_LED_PIN, 1);
-          send_hid_tap(hid_key);
-        }
+        gpio_xor_mask(1u << PICO_DEFAULT_LED_PIN);
+        printf("[%lu ms] repeat frame last_raw=0x%08lx\n", now, last_frame);
+        fflush(stdout);
+        continue;
       }
+
+      frame_count++;
+      last_frame = rx_frame;
+      gpio_put(PICO_DEFAULT_LED_PIN, 1);
+
+      apple_ir_frame_t apple = apple_frame_from_raw(rx_frame);
+      char custom0_bits[9];
+      char custom1_bits[9];
+      char command_bits[9];
+      char remote_id_bits[9];
+      byte_to_bits(apple.custom0, custom0_bits);
+      byte_to_bits(apple.custom1, custom1_bits);
+      byte_to_bits(apple.command, command_bits);
+      byte_to_bits(apple.remote_id, remote_id_bits);
+
+      printf("[%lu ms] #%lu raw=0x%08lx bytes=%02x %02x %02x %02x "
+             "bits=%s %s %s %s",
+             now, frame_count, rx_frame, apple.custom0, apple.custom1,
+             apple.command, apple.remote_id, custom0_bits, custom1_bits,
+             command_bits, remote_id_bits);
+
+      if (apple_frame_has_custom_code(apple)) {
+        uint8_t logical_command = apple_logical_command(apple.command);
+        const char *sequence = "none";
+        if (logical_command == APPLE_SELECT_TAIL &&
+            pending_apple_prefix != 0 &&
+            now - pending_apple_prefix_time <= APPLE_SEQUENCE_TIMEOUT_MS) {
+          sequence = apple_sequence_name(pending_apple_prefix);
+        }
+        if (apple_command_is_prefix(logical_command)) {
+          pending_apple_prefix = logical_command;
+          pending_apple_prefix_time = now;
+        } else if (logical_command != APPLE_SELECT_TAIL) {
+          pending_apple_prefix = 0;
+        }
+
+        printf(" apple=yes custom=ok command_raw=0x%02x command=0x%02x (%s) "
+               "remote_id=0x%02x parity=%s sequence=%s\n",
+               apple.command, logical_command,
+               apple_command_name(logical_command), apple.remote_id,
+               apple_command_parity_ok(apple) ? "ok" : "bad", sequence);
+      } else if (nec_decode_frame(rx_frame, &rx_address, &rx_data)) {
+        printf(" apple=no nec=valid address=0x%02x data=0x%02x\n",
+               rx_address, rx_data);
+        pending_apple_prefix = 0;
+      } else {
+        printf(" apple=no nec=invalid\n");
+        pending_apple_prefix = 0;
+      }
+
+      fflush(stdout);
     }
   }
 
   return 0;
-}
-
-uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id,
-                               hid_report_type_t report_type, uint8_t *buffer,
-                               uint16_t reqlen) {
-  (void)itf;
-  (void)report_id;
-  (void)report_type;
-  (void)buffer;
-  (void)reqlen;
-
-  return 0;
-}
-
-void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id,
-                           hid_report_type_t report_type, uint8_t const *buffer,
-                           uint16_t bufsize) {
-  (void)itf;
-  (void)report_id;
-  (void)report_type;
-  (void)buffer;
-  (void)bufsize;
 }

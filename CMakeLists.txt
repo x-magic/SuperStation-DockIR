@@ -20,20 +20,18 @@ add_executable(pico_ir_keyboard)
 
 target_sources(pico_ir_keyboard PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/usb_descriptors.c
-        )
-
-target_include_directories(pico_ir_keyboard PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
 
 target_link_libraries(pico_ir_keyboard PUBLIC
         pico_stdlib
         hardware_pio
-        pico_unique_id
         nec_receive_library
         )
 
-pico_add_extra_outputs(pico_ir_keyboard)
+target_compile_definitions(pico_ir_keyboard PRIVATE
+        PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000
+        )
 
-family_configure_device_example(pico_ir_keyboard noos)
+pico_enable_stdio_usb(pico_ir_keyboard 1)
+pico_enable_stdio_uart(pico_ir_keyboard 1)
+pico_add_extra_outputs(pico_ir_keyboard)
