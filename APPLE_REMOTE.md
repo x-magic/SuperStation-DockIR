@@ -29,27 +29,33 @@ therefore prints both:
 
 ## Serial Output
 
-Flash `build/pico_ir_keyboard.uf2`, then open the Pico serial port. The build
-enables both USB CDC stdio and UART stdio.
+Flash `build/pico_ir_keyboard.uf2`, then open UART0 with a TTL adapter. The
+build enables UART stdio on `GP0`/`GP1` at 115200 baud. USB CDC stdio is
+intentionally disabled so the USB port only exposes the keyboard HID interface.
 
-Example Apple-looking line:
+Example lines:
 
 ```text
-[12345 ms] #7 raw=0xf70687ee bytes=ee 87 06 f7 bits=11101110 10000111 00000110 11110111 apple=yes custom=ok command_raw=0x06 command=0x03 (Right / Next) remote_id=0xf7 parity=ok sequence=none
+[23 ms] DockIR Apple Remote firmware boot
+[24 ms] stdio=uart tx=GP0 rx=GP1 baud=115200 usb_cdc=disabled ir_gpio=GP27
+[25 ms] pairing=none accepting=any-apple-remote
+[12345 ms] button raw=0xf70687ee bytes=ee 87 06 f7 command=0x03 name=Right remote_id=0xf7 hid=ArrowRight paired=0
+[12680 ms] tail raw=0xf70587ee bytes=ee 87 05 f7 remote_id=0xf7 active_hid=Enter
+[45012 ms] pairing_request raw=0xf70287e0 bytes=e0 87 02 f7 remote_id=0xf7 count=5/5
+[45013 ms] pairing=stored remote_id=0xf7
+[60002 ms] frame raw=0xfb8287ee bytes=ee 87 82 fb ignored=bad-parity
 ```
 
 Fields to check:
 
 - `bytes=ee 87 ...` confirms the Apple-specific address/custom-code pattern.
-- `bits=...` shows the same four payload bytes in binary, grouped as
-  `custom0 custom1 command_raw remote_id`.
-- `command_raw=...` shows the exact command byte, including parity bit 0.
 - `command=...` shows the normalized Apple command byte and the branch's
   current command label.
 - `remote_id=...` is the Apple pair/remote ID byte from the frame.
-- `parity=ok` confirms bit 0 matches the normalized command and remote ID.
-- `sequence=Center` or `sequence=Play/Pause` appears when the aluminum remote's
-  prefix frame is followed by the shared `0x02` tail command.
+- `hid=...` shows the USB keyboard key emitted for the decoded command.
+- `tail ... active_hid=...` shows the aluminum remote's shared `0x02` tail
+  frame being ignored as a separate key while preserving hold/repeat state.
+- `ignored=...` gives the reject reason for malformed or unsupported frames.
 
 ## Captured Aluminum Apple Remote Pattern
 

@@ -36,6 +36,22 @@ The build produces:
 - `build/pico_ir_keyboard.elf` for debugger loading.
 - `build/pico_ir_keyboard.uf2` for drag-and-drop flashing to the Pico.
 
+The default build intentionally uses a 4 Mbit / 512 KiB logical flash layout
+(`DOCKIR_FLASH_SIZE_BYTES=524288`). That keeps one firmware image usable on both
+standard Pico development boards and the smaller production board. The paired
+remote ID is stored in the final 4 KiB sector of that logical flash range.
+
+## Serial Logging
+
+Firmware diagnostics are written to RP2040 UART0 stdio only:
+
+- TX: `GP0`
+- RX: `GP1`
+- Baud: `115200`
+
+USB CDC stdio is intentionally disabled, so the USB device profile remains the
+keyboard HID interface only.
+
 ## Hardware Notes
 
 - IR receiver input defaults to `GP27`.
