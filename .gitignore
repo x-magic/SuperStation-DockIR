@@ -1,0 +1,31 @@
+# CMake build directories
+build/
+build-*/
+build_*
+cmake-build-debug/
+cmake-build-release/
+
+# Pico SDK submodules and downloads
+_deps/
+pico-sdk/
+
+# Backup folder
+_backups/
+
+# Compiled firmware files
+*.elf
+*.bin
+*.hex
+*.uf2
+*.map
+*.dis
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS temporary files
+.DS_Store
+Thumbs.db
