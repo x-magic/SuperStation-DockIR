@@ -23,78 +23,64 @@
  *
  */
 
+#include <string.h>
+
+#include "pico/unique_id.h"
 #include "tusb.h"
 
-/* A combination of interfaces must have a unique product id, since PC will save device driver after the first plug.
- * Same VID/PID with different interface e.g MSC (first), then CDC (later) will possibly cause system error on PC.
+/* A combination of interfaces must have a unique product id, since PC will
+ * save device driver after the first plug. Same VID/PID with different
+ * interface e.g MSC (first), then CDC (later) will possibly cause system error
+ * on PC.
  *
  * Auto ProductID layout's Bitmap:
  *   [MSB]         HID | MSC | CDC          [LSB]
  */
-#define _PID_MAP(itf, n)  ( (CFG_TUD_##itf) << (n) )
-#define USB_PID           (0x4000 | _PID_MAP(CDC, 0) | _PID_MAP(MSC, 1) | _PID_MAP(HID, 2) | \
-                           _PID_MAP(MIDI, 3) | _PID_MAP(VENDOR, 4) )
+#define _PID_MAP(itf, n) ((CFG_TUD_##itf) << (n))
+#define USB_PID                                                                \
+  (0x4000 | _PID_MAP(CDC, 0) | _PID_MAP(MSC, 1) | _PID_MAP(HID, 2) |           \
+   _PID_MAP(MIDI, 3) | _PID_MAP(VENDOR, 4))
 
 //--------------------------------------------------------------------+
 // Device Descriptors
 //--------------------------------------------------------------------+
-tusb_desc_device_t const desc_device =
-{
-    .bLength            = sizeof(tusb_desc_device_t),
-    .bDescriptorType    = TUSB_DESC_DEVICE,
-    .bcdUSB             = 0x0200,
-    .bDeviceClass       = 0x00,
-    .bDeviceSubClass    = 0x00,
-    .bDeviceProtocol    = 0x00,
-    .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+tusb_desc_device_t const desc_device = {.bLength = sizeof(tusb_desc_device_t),
+                                        .bDescriptorType = TUSB_DESC_DEVICE,
+                                        .bcdUSB = 0x0200,
+                                        .bDeviceClass = 0x00,
+                                        .bDeviceSubClass = 0x00,
+                                        .bDeviceProtocol = 0x00,
+                                        .bMaxPacketSize0 =
+                                            CFG_TUD_ENDPOINT0_SIZE,
 
-    .idVendor           = 0x1c4f,//0x046D,//0xCafe,
-    .idProduct          = 0x0002,//0xC31C,//USB_PID,
-    .bcdDevice          = 0x0100,
+                                        .idVendor = 0x1c4f,
+                                        .idProduct = 0x0002,
+                                        .bcdDevice = 0x0100,
 
-    .iManufacturer      = 0x01,
-    .iProduct           = 0x02,
-    .iSerialNumber      = 0x03,
+                                        .iManufacturer = 0x01,
+                                        .iProduct = 0x02,
+                                        .iSerialNumber = 0x03,
 
-    .bNumConfigurations = 0x01
-};
-
-//#define USB_VID 0x046D
-//#define USB_PID 0xC31C
+                                        .bNumConfigurations = 0x01};
 
 // Invoked when received GET DEVICE DESCRIPTOR
 // Application return pointer to descriptor
-uint8_t const * tud_descriptor_device_cb(void)
-{
-  return (uint8_t const *) &desc_device;
+uint8_t const *tud_descriptor_device_cb(void) {
+  return (uint8_t const *)&desc_device;
 }
 
 //--------------------------------------------------------------------+
 // HID Report Descriptor
 //--------------------------------------------------------------------+
 
-uint8_t const desc_hid_report1[] =
-{
-  TUD_HID_REPORT_DESC_KEYBOARD()
-};
-
-uint8_t const desc_hid_report2[] =
-{
-  TUD_HID_REPORT_DESC_MOUSE()
-};
+uint8_t const desc_hid_report[] = {TUD_HID_REPORT_DESC_KEYBOARD()};
 
 // Invoked when received GET HID REPORT DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
-uint8_t const * tud_hid_descriptor_report_cb(uint8_t itf)
-{
-  if (itf == 0)
-  {
-    return desc_hid_report1;
-  }
-  else if (itf == 1)
-  {
-    return desc_hid_report2;
+uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
+  if (itf == 0) {
+    return desc_hid_report;
   }
 
   return NULL;
@@ -104,34 +90,31 @@ uint8_t const * tud_hid_descriptor_report_cb(uint8_t itf)
 // Configuration Descriptor
 //--------------------------------------------------------------------+
 
-enum
-{
-  ITF_NUM_HID1,
-  ITF_NUM_HID2,
-  ITF_NUM_TOTAL
-};
+enum { ITF_NUM_KEYBOARD, ITF_NUM_TOTAL };
 
-#define  CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_HID_DESC_LEN)
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
 
-#define EPNUM_HID1   0x81
-#define EPNUM_HID2   0x82
+#define EPNUM_KEYBOARD 0x81
+#define STRING_INDEX_SERIAL 3
+#define USB_SERIAL_LEN (PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2u + 1u)
 
-uint8_t const desc_configuration[] =
-{
-  // Config number, interface count, string index, total length, attribute, power in mA
-  TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+uint8_t const desc_configuration[] = {
+    // Config number, interface count, string index, total length, attribute,
+    // power in mA
+    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN,
+                          TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
 
-  // Interface number, string index, protocol, report descriptor len, EP In address, size & polling interval
-  TUD_HID_DESCRIPTOR(ITF_NUM_HID1, 4, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report1), EPNUM_HID1, CFG_TUD_HID_EP_BUFSIZE, 10),
-  TUD_HID_DESCRIPTOR(ITF_NUM_HID2, 5, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report2), EPNUM_HID2, CFG_TUD_HID_EP_BUFSIZE, 10)
-};
+    // Interface number, string index, protocol, report descriptor len, EP In
+    // address, size & polling interval
+    TUD_HID_DESCRIPTOR(ITF_NUM_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD,
+                       sizeof(desc_hid_report), EPNUM_KEYBOARD,
+                       CFG_TUD_HID_EP_BUFSIZE, 10)};
 
 // Invoked when received GET CONFIGURATION DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
-uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
-{
-  (void) index; // for multiple configurations
+uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
+  (void)index; // for multiple configurations
   return desc_configuration;
 }
 
@@ -140,52 +123,59 @@ uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
 //--------------------------------------------------------------------+
 
 // array of pointer to string descriptors
-char const* string_desc_arr [] =
-{
-  (const char[]) { 0x09, 0x04 },  // 0: is supported language is English (0x0409)
-  "TinyUSB",                      // 1: Manufacturer
-  "pico_ir_keyboard",             // 2: Product
-  "123456",                       // 3: Serials, should use chip ID
-  "Keyboard Interface",           // 4: Interface 1 String
-  "Mouse Interface",              // 5: Interface 2 String
+char const *string_desc_arr[] = {
+    (const char[]){0x09, 0x04}, // 0: English (0x0409)
+    "Retro Remake",             // 1: Manufacturer
+    "Super Dock IR",            // 2: Product
+    NULL,                       // 3: Serial, filled from the chip ID
+    "IR-Keyboard Interface",    // 4: Interface
 };
 
+static char usb_serial[USB_SERIAL_LEN];
 static uint16_t _desc_str[32];
 
 // Invoked when received GET STRING DESCRIPTOR request
-// Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
-uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
-{
-  (void) langid;
+// Application return pointer to descriptor, whose contents must exist long
+// enough for transfer to complete
+uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+  (void)langid;
 
   uint8_t chr_count;
 
-  if ( index == 0)
-  {
+  if (index == 0) {
     memcpy(&_desc_str[1], string_desc_arr[0], 2);
     chr_count = 1;
-  }else
-  {
+  } else {
     // Note: the 0xEE index string is a Microsoft OS 1.0 Descriptors.
     // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-defined-usb-descriptors
 
-    if ( !(index < sizeof(string_desc_arr)/sizeof(string_desc_arr[0])) ) return NULL;
+    if (index >= sizeof(string_desc_arr) / sizeof(string_desc_arr[0])) {
+      return NULL;
+    }
 
-    const char* str = string_desc_arr[index];
+    const char *str = string_desc_arr[index];
+    if (index == STRING_INDEX_SERIAL) {
+      if (usb_serial[0] == '\0') {
+        pico_get_unique_board_id_string(usb_serial, (uint)sizeof(usb_serial));
+      }
+      str = usb_serial;
+    }
 
-    // Cap at max char
-    chr_count = strlen(str);
-    if ( chr_count > 31 ) chr_count = 31;
+    size_t str_len = strlen(str);
+    if (str_len > 31) {
+      str_len = 31;
+    }
+    chr_count = (uint8_t)str_len;
 
-    // Convert ASCII string into UTF-16
-    for(uint8_t i=0; i<chr_count; i++)
-    {
-      _desc_str[1+i] = str[i];
+    // Convert ASCII string into UTF-16.
+    for (uint8_t i = 0; i < chr_count; i++) {
+      _desc_str[1 + i] = str[i];
     }
   }
 
-  // first byte is length (including header), second byte is string type
-  _desc_str[0] = (TUSB_DESC_STRING << 8 ) | (2*chr_count + 2);
+  // First byte is length including header, second byte is string type.
+  uint16_t desc_len = (uint16_t)(2u * (uint16_t)chr_count + 2u);
+  _desc_str[0] = (uint16_t)(((uint16_t)TUSB_DESC_STRING << 8u) | desc_len);
 
   return _desc_str;
 }

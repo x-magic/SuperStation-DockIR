@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.13)
 
 include(pico_sdk_import.cmake)
 
@@ -27,12 +27,13 @@ target_include_directories(pico_ir_keyboard PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
 
-target_link_libraries(pico_ir_keyboard LINK_PUBLIC
+target_link_libraries(pico_ir_keyboard PUBLIC
         pico_stdlib
         hardware_pio
+        pico_unique_id
         nec_receive_library
         )
 
 pico_add_extra_outputs(pico_ir_keyboard)
 
-family_configure_device_example(pico_ir_keyboard)
+family_configure_device_example(pico_ir_keyboard noos)
